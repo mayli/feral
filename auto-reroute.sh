@@ -47,10 +47,10 @@ fi
 ############################
 #
 #
-routes=(0.0.0.0 130.117.255.36 31.217.134.49 31.217.134.45 77.67.64.81 81.20.64.101 81.20.69.197 213.19.196.233 62.115.145.50)
-route_names=(Default Cogent Console#1 Console#2 GTT NTT#1 NTT#2 Level3 Telia)
+routes=(130.117.255.36 31.217.134.45 31.217.134.49 77.67.80.109 213.19.196.233 62.115.145.50)
+route_names=(Cogent IXReach1 IXReach2 GTT CenturyLink Telia)
 #
-test_files=(https://feral.io/test.bin https://cogent-1.feral.io/test.bin https://console-1.feral.io/test.bin https://console-2.feral.io/test.bin https://gtt-1.feral.io/test.bin https://ntt-1.feral.io/test.bin https://ntt-2.feral.io/test.bin https://level3.feral.io/test.bin https://telia.feral.io/test.bin)
+test_file=https://feral.io/test.bin
 count=-1
 reroute_log=/tmp/$(openssl rand -hex 10)
 ############################
@@ -66,7 +66,10 @@ function reroute_check {
 ext_IP=$(curl -4 -s https://network.feral.io/reroute | grep "Your IPv4 address is" | sed 's/<\/p>//g' | awk '{print $NF}')
 route_set=0
 while [ $route_set = 0 ]; do
-route_set=$(curl -4 -s "https://network.feral.io/looking-glass?action=traceroute&host=$ext_IP" | grep -c "$(curl -4 -s https://network.feral.io/reroute | grep checked | awk '{print $(NF-1)}' | sed 's|value=||g' | sed 's/"//g')")
+route_set=$(curl -4 -s "https://network.feral.io/looking-glass?action=mtr&host=$ext_IP" | grep -c "$(curl -4 -s https://network.feral.io/reroute | grep checked | awk '{print $(NF-1)}' | sed 's|value=||g' | sed 's/"//g')")
+sleep 5
+echo looking-glass is broken, :\( assuming route is set
+route_set=1
 done
 echo Route has been set.
 }
@@ -102,30 +105,35 @@ fi
 #
 
 mkdir -p ~/.auto-reroute
-if [ $(curl -4 -s https://network.feral.io/reroute | grep checked | grep -c 0.0.0.0) = 0  ]; then
-	echo "Starting off by setting route to default to ensure accurate results."
-	old_route=$(curl -4 -s https://network.feral.io/reroute | grep checked | awk '{print $(NF-1)}' | sed 's|value=||g' | sed 's/"//g')
-	timeout 10 curl -4 'https://network.feral.io/reroute' --data "nh=0.0.0.0" >/dev/null 2>&1
-	if [ $? = 124  ]; then
-		echo "there seems to be an issue with the reroute page..."
-		error_exit
-	fi
-	echo "Waiting for route change to take effect..."
-	ext_IP=$(curl -4 -s https://network.feral.io/reroute | grep "Your IPv4 address is" | sed 's/<\/p>//g' | awk '{print $NF}')
-	route_set=1
-	while [ $route_set = 1 ]; do
-	route_set=$(curl -4 -s "https://network.feral.io/looking-glass?action=traceroute&host=$ext_IP" | grep -c "$old_route")
-	done
-else
-	echo "You are currently using the default route"
-fi
+# if [ $(curl -4 -s https://network.feral.io/reroute | grep checked | grep -c 0.0.0.0) = 0  ]; then
+# 	echo "Starting off by setting route to default to ensure accurate results."
+# 	old_route=$(curl -4 -s https://network.feral.io/reroute | grep checked | awk '{print $(NF-1)}' | sed 's|value=||g' | sed 's/"//g')
+# 	timeout 10 curl -4 'https://network.feral.io/reroute' --data "nh=0.0.0.0" >/dev/null 2>&1
+# 	if [ $? = 124  ]; then
+# 		echo "there seems to be an issue with the reroute page..."
+# 		error_exit
+# 	fi
+# 	echo "Waiting for route change to take effect..."
+# 	ext_IP=$(curl -4 -s https://network.feral.io/reroute | grep "Your IPv4 address is" | sed 's/<\/p>//g' | awk '{print $NF}')
+# 	route_set=1
+# 	while [ $route_set = 1 ]; do
+# 	route_set=$(curl -4 -s "https://network.feral.io/looking-glass?action=traceroute&host=$ext_IP" | grep -c "$old_route")
+# 	done
+# else
+# 	echo "You are currently using the default route"
+# fi
 #
 	for i in "${routes[@]}"
 	do
 		((count++))
 		echo "Testing single segment download speed from ${route_names[$count]}..."
+
+		echo "Setting route to ${routes[$count]} ${route_names[$count]} ..."
+		curl -4 'https://network.feral.io/reroute' --data "nh=${routes[$count]}" >/dev/null 2>&1
+		echo "Waiting for route change to take effect..."
+		reroute_check
 		##need sed now because some european versions of curl insert a , in the speed results
-		messyspeed=$(echo -n "scale=2; " && curl -4 -s -L ${test_files[$count]} -w "%{speed_download}" -o /dev/null | sed "s/\,/\./g")
+		messyspeed=$(echo -n "scale=2; " && curl -4 -m 60 -s -L $test_file -w "%{speed_download}" -o /dev/null | sed "s/\,/\./g")
 		if [ -z "$(echo $messyspeed | awk -F\; '{print $2}'| sed 's/ //g')" ]; then
 			echo "There was an issue downloading ${test_files[$count]}"
 			speed="0"
